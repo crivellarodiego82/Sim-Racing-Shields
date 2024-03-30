@@ -1,87 +1,92 @@
-#include <SimRacing.h>
 #include <Joystick.h>
+#include <SimRacing.h>
+#include <Keyboard.h> // Libreria per l'invio dei tasti della tastiera
 
-// Imposta questa opzione su 'true' per inviare la posizione X/Y
-// dello shifter come un joystick. Questo non è necessario per la maggior parte dei giochi.
+const int Pin_OnOffSwitch = A3;
+int previousSwitchState = LOW;
+int switchState = LOW; // LOW = OFF, HIGH = ON
+
 const bool SendAnalogAxis = false;
-
-// Imposta questa opzione su 'true' per inviare lo stato grezzo del grilletto di retromarcia
-// come il proprio pulsante. Questo non è necessario per nessun gioco di corse,
-// ma può essere utile per scopi di controller personalizzati.
 const bool SendReverseRaw = false;
 
-// Pin utilizzati per collegare lo shifter e l'interruttore
 const int Pin_ShifterX   = A0;
 const int Pin_ShifterY   = A2;
-const int Pin_ShifterRev = 5; // Modificato da 2 a 5
-const int Pin_OnOffSwitch = A3; // Modificato da A5 a A3
+const int Pin_ShifterRev = 2;
 
 SimRacing::LogitechShifter shifter(Pin_ShifterX, Pin_ShifterY, Pin_ShifterRev);
 
-// Array di rapporti della trasmissione
-const int Gears[] = { 1, 2, 3, 4, 5, 6, -1 }; // -1 rappresenta la retromarcia
-const int NumGears = sizeof(Gears) / sizeof(Gears[0]); // Numero di rapporti
+const int Gears[] = { 1, 2, 3, 4, 5, 6, -1 };
+const int NumGears = sizeof(Gears) / sizeof(Gears[0]);
 
-const int ADC_Max = 1023;  // Lettura massima dell'ADC, 10 bit su AVR
+const int ADC_Max = 1023;
 
-// Inizializzazione dell'oggetto Joystick
 Joystick_ Joystick(
-	JOYSTICK_DEFAULT_REPORT_ID,      // Report predefinito (nessuna pagina aggiuntiva)
-	JOYSTICK_TYPE_JOYSTICK,          // Perché questo appare nel gestore dei joystick di Windows
-	NumGears + SendReverseRaw,       // Numero di pulsanti (7 rapporti: retromarcia e 1-6)
-	0,                               // Numero di hat switches (nessuno)
-	SendAnalogAxis, SendAnalogAxis,  // Includi gli assi X e Y per l'output analogico, se impostato sopra
-	false, false, false, false, false, false, false, false, false);  // Nessun altro asse
+    JOYSTICK_DEFAULT_REPORT_ID,
+    JOYSTICK_TYPE_JOYSTICK,
+    NumGears + SendReverseRaw,
+    0,
+    SendAnalogAxis,
+    SendAnalogAxis,
+    false, false, false, false, false, false, false, false, false
+);
 
-void updateJoystick();  // Funzione dichiarata in anticipo per ambienti non-Arduino
+void updateJoystick();
 
 void setup() {
-	Serial.begin(9600); // Inizializza la comunicazione seriale
-
-	shifter.begin();
-
-	// Inizializzazione dell'interruttore ON/OFF
-	pinMode(Pin_OnOffSwitch, INPUT_PULLUP);
-
-	// Se disponi di una, la tua calibrazione dovrebbe andare qui
-	
-	Joystick.begin(false);  // 'false' per disabilitare l'invio automatico
-	Joystick.setXAxisRange(0, ADC_Max);
-	Joystick.setYAxisRange(ADC_Max, 0);  // Inverti l'asse in modo che 'su' sia in alto
-
-	updateJoystick();  // Invia lo stato iniziale
+    Serial.begin(9600); // Inizializza il monitor seriale
+    shifter.begin();
+    pinMode(Pin_OnOffSwitch, INPUT_PULLUP); // Configura il pin dell'interruttore come input con pull-up interno
+    Joystick.begin(false);
+    Joystick.setXAxisRange(0, ADC_Max);
+    Joystick.setYAxisRange(ADC_Max, 0);
+    updateJoystick();
 }
 
 void loop() {
-	shifter.update();
+    shifter.update();
 
-	if (SendAnalogAxis == true || shifter.gearChanged()) {
-		updateJoystick();
-	}
+    switchState = digitalRead(Pin_OnOffSwitch); // Leggi lo stato dell'interruttore
+    Serial.println("Switch State: " + String(switchState)); // Stampa lo stato dell'interruttore sul monitor seriale
 
-	// Aggiungi codice per visualizzare lo stato dell'interruttore nel monitor seriale
-	int switchState = digitalRead(Pin_OnOffSwitch);
-	Serial.print("Switch State: ");
-	Serial.println(switchState);
+    // Verifica se lo stato dell'interruttore è cambiato da OFF a ON
+    if (switchState == HIGH && previousSwitchState == LOW) {
+        Keyboard.write('1'); // Invia il carattere '1'
+        delay(50); // Mantieni premuto il tasto per un breve periodo di tempo
+    }
 
-	// Verifica lo stato dell'interruttore
-	if (switchState == HIGH) {
-		Joystick.pressButton(NumGears); // Simula la pressione del pulsante aggiuntivo
-	} else {
-		Joystick.releaseButton(NumGears); // Rilascia il pulsante aggiuntivo
-	}
+    // Verifica se lo stato dell'interruttore è cambiato da ON a OFF
+    if (switchState == LOW && previousSwitchState == HIGH) {
+        Keyboard.write('0'); // Invia il carattere '0'
+        delay(50); // Mantieni premuto il tasto per un breve periodo di tempo
+    }
+
+    previousSwitchState = switchState; // Aggiorna lo stato precedente
+
+    if (SendAnalogAxis || shifter.gearChanged()) {
+        updateJoystick();
+    }
 }
 
 void updateJoystick() {
-	// Imposta i pulsanti corrispondenti ai rapporti
-	for (int i = 0; i < NumGears; i++) {
-		if (shifter.getGear() == Gears[i]) {
-			Joystick.pressButton(i);
-		}
-		else {
-			Joystick.releaseButton(i);
-		}
-	}
+    for (int i = 0; i < NumGears; i++) {
+        if (shifter.getGear() == Gears[i]) {
+            Joystick.pressButton(i);
+        } else {
+            Joystick.releaseButton(i);
+        }
+    }
 
-	Joystick.sendState();
+    if (SendAnalogAxis) {
+        int x = shifter.getPosition(SimRacing::X, 0, ADC_Max);
+        int y = shifter.getPosition(SimRacing::Y, 0, ADC_Max);
+        Joystick.setXAxis(x);
+        Joystick.setYAxis(y);
+    }
+
+    if (SendReverseRaw) {
+        bool reverseState = shifter.getReverseButton();
+        Joystick.setButton(NumGears, reverseState);
+    }
+
+    Joystick.sendState();
 }
