@@ -1,0 +1,96 @@
+#include <Joystick.h>
+#include <SimRacing.h>
+#include <Keyboard.h> // Libreria per l'invio dei tasti della tastiera
+
+const int Pin_OnOffSwitch = A3;
+int previousSwitchState = LOW;
+int switchState = LOW; // LOW = OFF, HIGH = ON
+
+const bool SendAnalogAxis = false;
+const bool SendReverseRaw = false;
+
+const int Pin_ShifterX   = A0;
+const int Pin_ShifterY   = A2;
+const int Pin_ShifterRev = 2;
+
+SimRacing::LogitechShifter shifter(Pin_ShifterX, Pin_ShifterY, Pin_ShifterRev);
+
+const int Gears[] = { 1, 2, 3, 4, 5, 6, -1 };
+const int NumGears = sizeof(Gears) / sizeof(Gears[0]);
+
+const int ADC_Max = 1023;
+
+Joystick_ Joystick(
+    JOYSTICK_DEFAULT_REPORT_ID,
+    JOYSTICK_TYPE_JOYSTICK,
+    NumGears + SendReverseRaw,
+    0,
+    SendAnalogAxis,
+    SendAnalogAxis,
+    false, false, false, false, false, false, false, false, false
+);
+
+void updateJoystick();
+
+void setup() {
+    Serial.begin(9600); // Inizializza il monitor seriale
+    shifter.begin();
+    pinMode(Pin_OnOffSwitch, INPUT_PULLUP); // Configura il pin dell'interruttore come input con pull-up interno
+    Joystick.begin(false);
+    Joystick.setXAxisRange(0, ADC_Max);
+    Joystick.setYAxisRange(ADC_Max, 0);
+    updateJoystick();
+}
+
+void loop() {
+    shifter.update();
+
+    switchState = digitalRead(Pin_OnOffSwitch); // Leggi lo stato dell'interruttore
+    Serial.println("Switch State: " + String(switchState)); // Stampa lo stato dell'interruttore sul monitor seriale
+
+    // Verifica se lo stato dell'interruttore è cambiato da OFF a ON
+    if (switchState == HIGH && previousSwitchState == LOW) {
+        for (int i = 0; i < 20; ++i) {
+            Keyboard.write('1'); // Invia il carattere '1'
+            delay(50); // Mantieni premuto il tasto per un breve periodo di tempo
+        }
+    }
+
+    // Verifica se lo stato dell'interruttore è cambiato da ON a OFF
+    if (switchState == LOW && previousSwitchState == HIGH) {
+        for (int i = 0; i < 20; ++i) {
+            Keyboard.write('0'); // Invia il carattere '0'
+            delay(50); // Mantieni premuto il tasto per un breve periodo di tempo
+        }
+    }
+
+    previousSwitchState = switchState; // Aggiorna lo stato precedente
+
+    if (SendAnalogAxis || shifter.gearChanged()) {
+        updateJoystick();
+    }
+}
+
+void updateJoystick() {
+    for (int i = 0; i < NumGears; i++) {
+        if (shifter.getGear() == Gears[i]) {
+            Joystick.pressButton(i);
+        } else {
+            Joystick.releaseButton(i);
+        }
+    }
+
+    if (SendAnalogAxis) {
+        int x = shifter.getPosition(SimRacing::X, 0, ADC_Max);
+        int y = shifter.getPosition(SimRacing::Y, 0, ADC_Max);
+        Joystick.setXAxis(x);
+        Joystick.setYAxis(y);
+    }
+
+    if (SendReverseRaw) {
+        bool reverseState = shifter.getReverseButton();
+        Joystick.setButton(NumGears, reverseState);
+    }
+
+    Joystick.sendState();
+}
